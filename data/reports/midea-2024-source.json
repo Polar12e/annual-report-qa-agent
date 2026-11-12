@@ -1,0 +1,14 @@
+{
+  "report_id": "MIDEA-2024-CAS",
+  "source_type": "user_provided_local_pdf",
+  "source_path": "F:\\edgedownload\\美的集团：海外监管公告 - 美的集团股份有限公司2024年度报告、2024年年度报告摘要及2024年度财务报表及审计报告.pdf",
+  "official_url": null,
+  "sha256": "99950e0093665865783f30292796e013e00d995311bd5c6ee45a1c40fc4268e8",
+  "pages": 452,
+  "accounting_basis": "Chinese Accounting Standards",
+  "notes": [
+    "2023 cost of revenue restated by 2928031 thousand CNY for warranty expense reclassification (PDF 199, printed 197).",
+    "Cost is stored as positive expense magnitude; source statement presents it in parentheses.",
+    "PDF page numbers are 1-based; annual report printed page equals PDF page minus 2 for selected pages."
+  ]
+}

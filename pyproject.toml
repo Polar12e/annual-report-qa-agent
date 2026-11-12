@@ -1,0 +1,13 @@
+[project]
+name = "listed-company-financial-agent"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+llm = ["openai>=1.0"]
+dev = ["pypdf>=4.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

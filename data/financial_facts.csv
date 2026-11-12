@@ -1,0 +1,13 @@
+record_id,company_code,year,metric_code,value,currency,original_unit,statement_scope,report_id,pdf_page,adjusted
+midea24-revenue,000333.SZ,2024,revenue,407149600,CNY,千元,consolidated,MIDEA-2024-CAS,159,false
+midea23-revenue,000333.SZ,2023,revenue,372037280,CNY,千元,consolidated,MIDEA-2024-CAS,159,false
+midea24-cost,000333.SZ,2024,cost_of_revenue,299584935,CNY,千元,consolidated,MIDEA-2024-CAS,159,false
+midea23-cost,000333.SZ,2023,cost_of_revenue,276409404,CNY,千元,consolidated,MIDEA-2024-CAS,159,true
+midea24-profit,000333.SZ,2024,net_income,38537237,CNY,千元,consolidated,MIDEA-2024-CAS,159,false
+midea23-profit,000333.SZ,2023,net_income,33719935,CNY,千元,consolidated,MIDEA-2024-CAS,159,false
+midea24-cash,000333.SZ,2024,operating_cash_flow,60511572,CNY,千元,consolidated,MIDEA-2024-CAS,161,false
+midea23-cash,000333.SZ,2023,operating_cash_flow,57902611,CNY,千元,consolidated,MIDEA-2024-CAS,161,false
+midea24-assets,000333.SZ,2024,total_assets,604351853,CNY,千元,consolidated,MIDEA-2024-CAS,157,false
+midea23-assets,000333.SZ,2023,total_assets,486038184,CNY,千元,consolidated,MIDEA-2024-CAS,157,false
+midea24-liabilities,000333.SZ,2024,total_liabilities,376684462,CNY,千元,consolidated,MIDEA-2024-CAS,158,false
+midea23-liabilities,000333.SZ,2023,total_liabilities,311738535,CNY,千元,consolidated,MIDEA-2024-CAS,158,false

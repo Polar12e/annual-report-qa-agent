@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.env
+_test_tmp/
+.piptmp/
+.tmp/
+.cache/
+.vendor/
+.git-github/
+.git-old/
+*.whl

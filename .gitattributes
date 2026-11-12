@@ -1,0 +1,4 @@
+* text=auto
+*.pdf binary
+*.npz binary
+*.jsonl text

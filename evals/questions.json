@@ -1,0 +1,191 @@
+[
+  {
+    "id": "q01",
+    "question": "2023年营业成本为什么重述？影响多少？",
+    "expected_pages": [199, 126, 355, 159]
+  },
+  {
+    "id": "q02",
+    "question": "质保费重分类对2023年营业成本的影响金额是多少？",
+    "expected_pages": [199, 126, 355]
+  },
+  {
+    "id": "q03",
+    "question": "2024年营业收入是多少？",
+    "expected_pages": [159],
+    "check": {"kind": "fact", "metric": "revenue", "year": 2024, "expected": "407149600"}
+  },
+  {
+    "id": "q04",
+    "question": "2024年营业成本是多少？",
+    "expected_pages": [159],
+    "check": {"kind": "fact", "metric": "cost_of_revenue", "year": 2024, "expected": "299584935"}
+  },
+  {
+    "id": "q05",
+    "question": "2024年归属于母公司股东的净利润是多少？",
+    "expected_pages": [159],
+    "check": {"kind": "fact", "metric": "net_income", "year": 2024, "expected": "38537237"}
+  },
+  {
+    "id": "q06",
+    "question": "2024年经营活动产生的现金流量净额是多少？",
+    "expected_pages": [161],
+    "check": {"kind": "fact", "metric": "operating_cash_flow", "year": 2024, "expected": "60511572"}
+  },
+  {
+    "id": "q07",
+    "question": "2024年末资产总计是多少？",
+    "expected_pages": [157],
+    "check": {"kind": "fact", "metric": "total_assets", "year": 2024, "expected": "604351853"}
+  },
+  {
+    "id": "q08",
+    "question": "2024年末负债合计是多少？",
+    "expected_pages": [158],
+    "check": {"kind": "fact", "metric": "total_liabilities", "year": 2024, "expected": "376684462"}
+  },
+  {
+    "id": "q09",
+    "question": "2024年毛利率是多少？",
+    "expected_pages": [51, 159],
+    "check": {"kind": "metric", "metric": "gross_margin", "year": 2024, "expected": "0.2641895387", "tolerance": "1e-9"}
+  },
+  {
+    "id": "q10",
+    "question": "2024年资产负债率是多少？",
+    "expected_pages": [157, 158],
+    "check": {"kind": "metric", "metric": "debt_to_assets", "year": 2024, "expected": "0.6232866833", "tolerance": "1e-9"}
+  },
+  {
+    "id": "q11",
+    "question": "2024年营业收入同比增长多少？",
+    "expected_pages": [51, 159],
+    "check": {"kind": "metric", "metric": "revenue_yoy", "year": 2024, "expected": "0.0943784988", "tolerance": "1e-9"}
+  },
+  {
+    "id": "q12",
+    "question": "2023年营业收入是多少？",
+    "expected_pages": [159],
+    "check": {"kind": "fact", "metric": "revenue", "year": 2023, "expected": "372037280"}
+  },
+  {
+    "id": "q13",
+    "question": "年末现金及现金等价物余额是多少？",
+    "expected_pages": [161]
+  },
+  {
+    "id": "q14",
+    "question": "2023年营业成本经重列后的金额是多少？",
+    "expected_pages": [159, 199],
+    "check": {"kind": "fact", "metric": "cost_of_revenue", "year": 2023, "expected": "276409404"}
+  },
+  {
+    "id": "h01",
+    "split": "holdout",
+    "question": "2024年研发费用是多少？",
+    "expected_pages": [159]
+  },
+  {
+    "id": "h02",
+    "split": "holdout",
+    "question": "2024年销售费用是多少？",
+    "expected_pages": [159]
+  },
+  {
+    "id": "h03",
+    "split": "holdout",
+    "question": "2024年所得税费用是多少？",
+    "expected_pages": [159]
+  },
+  {
+    "id": "h04",
+    "split": "holdout",
+    "question": "2024年末存货是多少？",
+    "expected_pages": [157]
+  },
+  {
+    "id": "pa01",
+    "split": "para",
+    "question": "公司仓库里压了多少货还没卖出去？",
+    "expected_pages": [157]
+  },
+  {
+    "id": "pa02",
+    "split": "para",
+    "question": "客户欠公司的钱还有多少没收回来？",
+    "expected_pages": [157]
+  },
+  {
+    "id": "pa03",
+    "split": "para",
+    "question": "公司去年给股东分了多少现金？",
+    "expected_pages": [85, 161]
+  },
+  {
+    "id": "pa04",
+    "split": "para",
+    "question": "公司一年在技术上要投多少钱？",
+    "expected_pages": [54, 159]
+  },
+  {
+    "id": "pa05",
+    "split": "para",
+    "question": "公司一年给员工发多少现金？",
+    "expected_pages": [161]
+  },
+  {
+    "id": "pa06",
+    "split": "para",
+    "question": "人民币升值或贬值，公司的利润会变动多少？",
+    "expected_pages": [436]
+  },
+  {
+    "id": "pa07",
+    "split": "para",
+    "question": "卖不掉的存货要计提多少损失？",
+    "expected_pages": [251, 376, 220]
+  },
+  {
+    "id": "pa08",
+    "split": "para",
+    "question": "大股东的股票有没有被抵押出去？",
+    "expected_pages": [143]
+  },
+  {
+    "id": "ph01",
+    "split": "para_holdout",
+    "question": "公司欠供应商的货款有多少？",
+    "expected_pages": [158]
+  },
+  {
+    "id": "ph02",
+    "split": "para_holdout",
+    "question": "公司去年一共交了多少税？",
+    "expected_pages": [161]
+  },
+  {
+    "id": "ph03",
+    "split": "para_holdout",
+    "question": "公司账上躺着多少钱？",
+    "expected_pages": [157]
+  },
+  {
+    "id": "ph04",
+    "split": "para_holdout",
+    "question": "公司收购别人多花了多少钱？",
+    "expected_pages": [157]
+  },
+  {
+    "id": "ph05",
+    "split": "para_holdout",
+    "question": "一年付给银行的利息是多少？",
+    "expected_pages": [161]
+  },
+  {
+    "id": "ph06",
+    "split": "para_holdout",
+    "question": "公司一共有多少人在上班？",
+    "expected_pages": [83]
+  }
+]
