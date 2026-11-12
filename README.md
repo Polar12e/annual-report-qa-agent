@@ -1,4 +1,5 @@
-# 上市公司年报问答 Agent（V1）
+![CI](https://github.com/Polar12e/annual-report-qa-agent/actions/workflows/ci.yml/badge.svg)
+# 上市公司年报问答 Agent（V1.1）
 
 V1 的目标：回答需要**翻年报原文**的问题，并给出页码引用；数字仍然来自确定性工具，不由模型编造。
 
@@ -229,7 +230,6 @@ index.search("公司账上躺着多少钱", top_k=3)
 - [x] 检索：分块 + BM25 + 报表页提示 + 查询扩展
 - [x] 评测：dev 14 + holdout 4，检索与数值指标
 - [x] Agent 循环：脚本策略 + OpenAI 兼容策略
-- [x] 测试：64 个单元测试
 - [x] 向量通道：`Embedder` 协议 + LSA + OpenAI 兼容端点 + 向量缓存
 - [x] 混合检索：加权 RRF（k=60），稠密权重按实测结论默认关闭
 - [x] 概念重写：领域词表 + bigram 匹配 + OOV 触发，`expanded` 成为默认通道
