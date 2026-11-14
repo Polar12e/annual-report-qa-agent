@@ -3,7 +3,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from src.policy import DataPolicy
-from src.tools import FinancialToolBox, TOOL_SPECS
+from src.tools import TOOL_SPECS, FinancialToolBox
 
 REPORTS = Path(__file__).resolve().parents[1] / "data" / "reports"
 
@@ -34,7 +34,7 @@ class ToolCallTests(unittest.TestCase):
         result = self.box.call("query_financials", {"company_code": "000333.SZ", "year": 2024, "metric_codes": ["revenue"]})
         self.assertTrue(result["ok"])
         self.assertEqual(result["result"]["count"], 1)
-        self.assertEqual(result["result"]["facts"][0]["value"], Decimal("407149600"))
+        self.assertEqual(result["result"]["facts"][0]["value"], Decimal(407149600))
 
     def test_query_financials_defaults_to_all_metrics(self):
         result = self.box.call("query_financials", {"company_code": "000333.SZ", "year": 2024})
@@ -64,6 +64,21 @@ class ToolCallTests(unittest.TestCase):
         top = result["result"]["matches"][0]
         self.assertEqual(top["pdf_page"], 159)
         self.assertIn("score", top)
+
+    def test_search_report_returns_hit_window(self):
+        result = self.box.call(
+            "search_report",
+            {"keyword": "2023年营业成本为什么重述？", "max_results": 3},
+        )
+        self.assertTrue(result["ok"])
+        top = result["result"]["matches"][0]
+        self.assertEqual(top["pdf_page"], 199)
+        self.assertIn("销售费用", top["text"])
+        self.assertIn("营业成本", top["text"])
+        self.assertIn("page_heading", top)
+        self.assertGreaterEqual(top["line_start"], 1)
+        self.assertGreaterEqual(top["line_end"], top["line_start"])
+        self.assertIn("matched_terms", top)
 
     def test_search_snippets_follow_policy(self):
         box = FinancialToolBox(policy=DataPolicy(max_snippets=2, max_snippet_chars=30))

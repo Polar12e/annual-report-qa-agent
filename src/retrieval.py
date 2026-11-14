@@ -43,6 +43,7 @@ DEFAULT_CORPUS = Path(__file__).resolve().parents[1] / "corpus" / "pages.jsonl"
 FALLBACK_REPORT_DIR = Path(__file__).resolve().parents[1] / "data" / "reports"
 CHUNK_SIZE = 360
 CHUNK_OVERLAP = 80
+WINDOW_RADIUS = 2
 BM25_K1 = 1.5
 BM25_B = 0.75
 RRF_K = 60
@@ -94,6 +95,10 @@ class Chunk:
     page: int
     index: int
     text: str
+    # 1-based line range in the page's non-empty, stripped text lines.  Defaults
+    # keep manually constructed chunks (mostly tests) source-compatible.
+    line_start: int = 0
+    line_end: int = 0
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,18 @@ class SearchHit:
     text: str
     score: float
     channel: str = "bm25"
+    line_start: int = 0
+    line_end: int = 0
+    matched_terms: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class HitWindow:
+    heading: str
+    text: str
+    line_start: int
+    line_end: int
+    truncated: bool = False
 
 
 def normalize(text: str) -> str:
@@ -123,28 +140,95 @@ def tokenize(text: str) -> list[str]:
     return tokens
 
 
-def chunk_page(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    chunks: list[str] = []
-    current: list[str] = []
+def page_lines(text: str) -> list[str]:
+    """Non-empty, stripped lines used by both chunking and hit windows.
+
+    Line numbers are 1-based positions in this normalized list, not printed page
+    line numbers.  Keeping one definition avoids a chunk/window offset mismatch.
+    """
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def chunk_page_spans(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[tuple[str, int, int]]:
+    """Split a page into line-aware chunks: ``(text, line_start, line_end)``."""
+    lines = page_lines(text)
+    chunks: list[tuple[str, int, int]] = []
+    current: list[tuple[int, str]] = []
     length = 0
-    for line in lines:
+    for number, line in enumerate(lines, start=1):
         if current and length + len(line) > size:
-            chunks.append("\n".join(current))
-            tail: list[str] = []
+            chunks.append(("\n".join(line_text for _, line_text in current), current[0][0], current[-1][0]))
+            tail: list[tuple[int, str]] = []
             tail_length = 0
             for previous in reversed(current):
-                if tail_length + len(previous) > overlap:
+                if tail_length + len(previous[1]) > overlap:
                     break
                 tail.insert(0, previous)
-                tail_length += len(previous)
+                tail_length += len(previous[1])
             current = tail
             length = tail_length
-        current.append(line)
+        current.append((number, line))
         length += len(line)
     if current:
-        chunks.append("\n".join(current))
+        chunks.append(("\n".join(line_text for _, line_text in current), current[0][0], current[-1][0]))
     return chunks
+
+
+def chunk_page(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """Backward-compatible text-only view of :func:`chunk_page_spans`."""
+    return [piece for piece, _, _ in chunk_page_spans(text, size=size, overlap=overlap)]
+
+
+def _locate_hit_lines(lines: list[str], hit: SearchHit) -> tuple[int, int]:
+    """Return a 0-based, end-exclusive line span for a hit."""
+    if hit.line_start >= 1 and hit.line_end >= hit.line_start:
+        start = min(hit.line_start - 1, len(lines))
+        end = min(max(hit.line_end, hit.line_start), len(lines))
+        if start < end:
+            return start, end
+    target = page_lines(hit.text)
+    if target:
+        for start in range(len(lines) - len(target) + 1):
+            if lines[start:start + len(target)] == target:
+                return start, start + len(target)
+        return 0, min(len(lines), len(target))
+    return 0, 0
+
+
+def window_for_hit(
+    page_text: str,
+    hit: SearchHit,
+    *,
+    radius: int = WINDOW_RADIUS,
+    max_chars: int = 900,
+) -> HitWindow:
+    """Build the page heading plus a line window around the hit chunk.
+
+    The chunk is the retrieval anchor; the window may cross into neighbouring
+    chunks on the same page.  This is the part that returns the "营业成本" row
+    even when the best-scoring chunk ends at "销售费用".
+    """
+    lines = page_lines(page_text)
+    heading = "\n".join(lines[:3])
+    if not lines:
+        text = hit.text[:max_chars]
+        return HitWindow(heading=heading, text=text, line_start=0, line_end=0,
+                         truncated=len(hit.text) > max_chars)
+
+    start, end = _locate_hit_lines(lines, hit)
+    lo = max(0, start - radius)
+    hi = min(len(lines), max(end, start + 1) + radius)
+    window = "\n".join(f"{number}: {lines[number - 1]}" for number in range(lo + 1, hi + 1))
+    truncated = len(window) > max_chars
+    if truncated:
+        window = window[:max_chars]
+    return HitWindow(
+        heading=heading[:240],
+        text=window,
+        line_start=lo + 1,
+        line_end=hi,
+        truncated=truncated,
+    )
 
 
 class ChunkedIndex:
@@ -155,7 +239,7 @@ class ChunkedIndex:
         self.pages = pages
 
     @classmethod
-    def from_corpus(cls, path: str | Path = DEFAULT_CORPUS, **options) -> "ChunkedIndex":
+    def from_corpus(cls, path: str | Path = DEFAULT_CORPUS, **options) -> ChunkedIndex:
         chunks: list[Chunk] = []
         pages: dict[int, str] = {}
         with Path(path).open(encoding="utf-8") as handle:
@@ -164,13 +248,14 @@ class ChunkedIndex:
                 page = int(record["page"])
                 text = record.get("text", "")
                 pages[page] = text
-                for index, piece in enumerate(chunk_page(text)):
+                for index, (piece, line_start, line_end) in enumerate(chunk_page_spans(text)):
                     if piece.strip():
-                        chunks.append(Chunk(page=page, index=index, text=piece))
+                        chunks.append(Chunk(page=page, index=index, text=piece,
+                                            line_start=line_start, line_end=line_end))
         return cls._build(chunks, pages, **options)
 
     @classmethod
-    def from_report_dir(cls, directory: str | Path = FALLBACK_REPORT_DIR, **options) -> "ChunkedIndex":
+    def from_report_dir(cls, directory: str | Path = FALLBACK_REPORT_DIR, **options) -> ChunkedIndex:
         chunks: list[Chunk] = []
         pages: dict[int, str] = {}
         paths = sorted(Path(directory).glob("page-*.txt"), key=lambda item: int(item.stem.split("-")[1]))
@@ -178,13 +263,14 @@ class ChunkedIndex:
             page = int(path.stem.split("-")[1])
             text = path.read_text(encoding="utf-8")
             pages[page] = text
-            for index, piece in enumerate(chunk_page(text)):
+            for index, (piece, line_start, line_end) in enumerate(chunk_page_spans(text)):
                 if piece.strip():
-                    chunks.append(Chunk(page=page, index=index, text=piece))
+                    chunks.append(Chunk(page=page, index=index, text=piece,
+                                        line_start=line_start, line_end=line_end))
         return cls._build(chunks, pages, **options)
 
     @classmethod
-    def _build(cls, chunks: list[Chunk], pages: dict[int, str], **options) -> "ChunkedIndex":
+    def _build(cls, chunks: list[Chunk], pages: dict[int, str], **options) -> ChunkedIndex:
         return cls(chunks, pages)
 
     def page_text(self, page: int) -> str:
@@ -193,12 +279,19 @@ class ChunkedIndex:
     def search(self, query: str, top_k: int = 5) -> list[SearchHit]:
         raise NotImplementedError
 
-    def _page_hits(self, page_scores: list[tuple[float, int]], top_k: int, channel: str) -> list[SearchHit]:
+    def _page_hits(self, page_scores: list[tuple[float, int]], top_k: int, channel: str,
+                   query_terms: tuple[str, ...] = ()) -> list[SearchHit]:
         hits: list[SearchHit] = []
         for score, position in page_scores[:top_k]:
             chunk = self.chunks[position]
+            matched = ()
+            if query_terms:
+                chunk_terms = set(tokenize(chunk.text))
+                matched = tuple(term for term in query_terms if term in chunk_terms)
             hits.append(SearchHit(page=chunk.page, chunk=chunk.index, text=chunk.text,
-                                  score=score, channel=channel))
+                                  score=score, channel=channel,
+                                  line_start=chunk.line_start, line_end=chunk.line_end,
+                                  matched_terms=matched))
         return hits
 
 
@@ -224,7 +317,7 @@ class PageIndex(ChunkedIndex):
         }
 
     @classmethod
-    def _build(cls, chunks: list[Chunk], pages: dict[int, str], **options) -> "PageIndex":
+    def _build(cls, chunks: list[Chunk], pages: dict[int, str], **options) -> PageIndex:
         return cls(chunks, pages, **options)
 
     def coverage(self, query: str) -> float:
@@ -283,7 +376,7 @@ class PageIndex(ChunkedIndex):
             for page, (score, index) in best_by_page.items()
         ]
         ranked.sort(key=lambda item: (-item[0], item[1]))
-        return self._page_hits(ranked, top_k, "bm25")
+        return self._page_hits(ranked, top_k, "bm25", query_terms=tuple(weights))
 
     def _statement_bonus(self, query: str, page: int) -> float:
         if any(marker in query for marker in NOTES_MARKERS):
@@ -305,7 +398,7 @@ class DenseIndex(ChunkedIndex):
 
     @classmethod
     def _build(cls, chunks: list[Chunk], pages: dict[int, str], *, embedder: Embedder | None = None,
-               cache: EmbeddingCache | None = None, chunk_tokens: list[list[str]] | None = None) -> "DenseIndex":
+               cache: EmbeddingCache | None = None, chunk_tokens: list[list[str]] | None = None) -> DenseIndex:
         provider = embedder or LsaEmbedder()
         texts = [chunk.text for chunk in chunks]
         tokens = chunk_tokens if chunk_tokens is not None else [tokenize(text) for text in texts]
@@ -354,14 +447,14 @@ class HybridIndex(ChunkedIndex):
         self.depth = depth
 
     @classmethod
-    def _build(cls, chunks: list[Chunk], pages: dict[int, str], *, channels: list[tuple[str, ChunkedIndex, float]]) -> "HybridIndex":
+    def _build(cls, chunks: list[Chunk], pages: dict[int, str], *, channels: list[tuple[str, ChunkedIndex, float]]) -> HybridIndex:
         return cls(channels)
 
     def search(self, query: str, top_k: int = 5) -> list[SearchHit]:
         if not query.strip():
             return []
         fused: dict[int, float] = {}
-        best_rank: dict[int, tuple[float, int, str]] = {}
+        best_rank: dict[int, tuple[float, int, str, tuple[str, ...]]] = {}
         for name, channel, weight in self.channels:
             if weight <= 0:
                 continue
@@ -371,14 +464,16 @@ class HybridIndex(ChunkedIndex):
                 contribution = weight / (self.k + rank)
                 current = best_rank.get(hit.page)
                 if current is None or contribution > current[0]:
-                    best_rank[hit.page] = (contribution, hit.chunk, name)
+                    best_rank[hit.page] = (contribution, hit.chunk, name, hit.matched_terms)
         ordered = sorted(fused.items(), key=lambda item: (-item[1], item[0]))
         results: list[SearchHit] = []
         for page, score in ordered[:top_k]:
-            _, chunk_index, name = best_rank[page]
+            _, chunk_index, name, matched = best_rank[page]
             chunk = self._chunk_at(page, chunk_index)
             results.append(SearchHit(page=page, chunk=chunk_index, text=chunk.text,
-                                     score=score, channel=name))
+                                     score=score, channel=name,
+                                     line_start=chunk.line_start, line_end=chunk.line_end,
+                                     matched_terms=matched))
         return results
 
     def _chunk_at(self, page: int, chunk_index: int) -> Chunk:
@@ -439,16 +534,21 @@ def load_index(corpus: str | Path | None = None, kind: str = "expanded", **optio
 
 __all__ = [
     "CHANNELS",
+    "DENSE_WEIGHT",
+    "WINDOW_RADIUS",
     "Chunk",
     "ChunkedIndex",
-    "DENSE_WEIGHT",
     "DenseIndex",
+    "HitWindow",
     "HybridIndex",
     "PageIndex",
     "SearchHit",
     "build_index",
     "chunk_page",
+    "chunk_page_spans",
     "load_index",
     "normalize",
+    "page_lines",
     "tokenize",
+    "window_for_hit",
 ]

@@ -13,6 +13,7 @@ V1.2 把 LLM 从协议占位推进到真实调用：新增 `src/llm_config.py`�
 
 - 全文语料：`corpus/pages.jsonl`，452 页、418,330 字符（其中 20 页无文本层）
 - 检索：四个可切换通道——`bm25`（词法基线）、`expanded`（OOV 触发的概念重写，默认）、`dense`（向量）、`hybrid`（RRF 融合）
+- 上下文组装：`search_report` 返回页标题 + 命中行窗口 + 行号，窗口可跨出最高分 chunk 到相邻 chunk
 - 向量层：`Embedder` 协议 + 离线 LSA + OpenAI 兼容端点，向量落盘缓存
 - 工具层：5 个带 JSON Schema 的工具，调度器永不抛异常
 - 策略：脚本策略（两步：`search_report` → `read_page`）+ OpenAI 兼容的 function calling 策略
@@ -20,7 +21,7 @@ V1.2 把 LLM 从协议占位推进到真实调用：新增 `src/llm_config.py`�
 - LLM 实调：DeepSeek `deepseek-flash`；6 题 agent 小集 6/6，32 题首轮 28/32（核心 dev+holdout 18/18）
 - 数据边界：`src/policy.py` 预留端点拒绝、片段截断、审计钩子（不实现加密/鉴权）
 - 离线评测：dev 14 + holdout 4 + 诊断集 para 8 + para_holdout 6，检索与数值两类指标
-- 测试：154 个单元测试
+- 测试：158 个单元测试
 - 学习笔记：`docs/rag-notes.md`（原理 → 代码映射 → 实测 → 走过的弯路）
 
 ## 目录结构
@@ -48,7 +49,7 @@ scripts/extract_pages.py               PDF → corpus 复现脚本
 scripts/check_llm.py                   LLM 配置/连通性检查（默认不联网）
 .env.example                           LLM 环境变量示例（不含真实 key）
 .github/workflows/ci.yml               GitHub Actions（测试 + 评测）
-tests/                                 154 个单元测试
+tests/                                 158 个单元测试
 data/financial_facts.csv               12 条已核验事实
 data/reports/                          固定 PDF、SHA256 清单、关键页文本
 ```
@@ -130,7 +131,8 @@ Agent 端到端首轮（DeepSeek `deepseek-flash`，`max_steps=6`，`evals/agent
 2. **分词**：中文按字符二元组（bigram），英文/数字按词切分；数字先去掉千分位逗号；PDF 换行导致的“归属于母公司股东的\n净利润”会先拼接。
 3. **结构提示**：查数型问题给“合并及公司利润表 / 资产负债表 / 现金流量表”标题页加 18 分；带“为什么 / 重述 / 重分类 / 影响 / 附注”的问题不加分，让附注页排前面。**去掉这 18 分，dev hit@1 从 1.00 掉到 0.57。**
 4. **概念重写**：`仓库` → 存货、`技术` → 研发投入、`抵押` → 质押……匹配用 bigram 而非子串（"在技术上要投多少钱"里没有"技术投入"这个词，但有"技术"）。
-5. **向量缓存**：`.cache/embeddings/*.npz`，键 = 语料指纹 + provider + 维度，重建索引不重算。
+5. **上下文组装**：`search_report` 返回页标题 + 命中行窗口 + 行号，窗口可以跨出最高分 chunk 到相邻 chunk；整页仍由 `read_page` 读取。这样 q01 的 199 页 top1 能同时看到"销售费用"和"营业成本"。
+6. **向量缓存**：`.cache/embeddings/*.npz`，键 = 语料指纹 + provider + 维度，重建索引不重算。
 
 已知失败模式：**纯语义缺口**（"客户欠的钱"、"账上躺着多少钱"、"一共多少人在上班"）——这需要预训练 embedding，LSA 在这份 418k 字符的语料上学不出语义（详见 `docs/rag-notes.md`）；以及跨页计算、表格列对齐。LLM agent 在 `para` 诊断集上还会因 `max_steps` 或题目口径（如 `ph04` 的"收购多花"）得不出结论；这些是诊断项，不是 `dev`/`holdout` 回归。
 
@@ -141,7 +143,7 @@ Agent 端到端首轮（DeepSeek `deepseek-flash`，`max_steps=6`，`evals/agent
 | `list_available_data` | 列出已核验的公司、年份、六个指标和事实条数；不代表年报全文 | 无 |
 | `query_financials` | 查询原始事实（含页码） | `company_code`、`year`、`metric_codes?` |
 | `calculate_metrics` | 计算三个指标（含公式、输入记录 ID 和来源页） | `company_code`、`year` |
-| `search_report` | 全文检索，可查未入库科目，返回页码、相关度和上下文 | `keyword`、`max_results?` |
+| `search_report` | 全文检索，可查未入库科目，返回页码、页标题、命中行窗口、行号和 matched_terms | `keyword`、`max_results?` |
 | `read_page` | 读取某一页的完整文本 | `page` |
 
 调用方式：
@@ -256,7 +258,7 @@ python -m evals.agent_eval --all --split holdout --live --allow-external
 ```python
 from src.policy import DataPolicy
 
-policy = DataPolicy(max_snippets=3, max_snippet_chars=400, audit_hook=print)
+policy = DataPolicy(max_snippets=3, max_snippet_chars=900, audit_hook=print)
 policy.ensure_endpoint("https://api.openai.com/v1")   # 抛 PolicyViolation
 policy.ensure_endpoint("http://127.0.0.1:11434/v1")   # 通过
 ```
@@ -319,7 +321,7 @@ index.search("公司账上躺着多少钱", top_k=3)
 - [x] 诊断评测：para 8 + para_holdout 6，逐通道对比
 - [x] LLM 配置层：provider/model/base URL/凭据/超时/重试/thinking 统一解析
 - [x] 学习笔记：`docs/rag-notes.md`
-- [x] 测试：154 个单元测试
+- [x] 测试：158 个单元测试
 
 待办：
 
@@ -327,7 +329,8 @@ index.search("公司账上躺着多少钱", top_k=3)
 - [ ] 中文分词（词典 + 最大匹配或引入 jieba），取代 char bigram
 - [ ] 增加“解释型”holdout（为什么/影响/归因），现在只有查数型
 - [ ] 重排：检索 20 条 → cross-encoder/LLM 打 3 条
-- [ ] 上下文组装：按行块保留行号，替代表格列易错位的整页截断
+- [x] 上下文组装第一阶段：chunk 行号 + 页标题 + 命中窗口 + matched_terms
+- [ ] 上下文组装第二阶段：表格感知窗口、多窗口合并、answer-span 评测
 - [x] DeepSeek `deepseek-flash` 真实调用（6 题小集 6/6；32 题首轮 28/32）
 - [x] `evals/agent_eval.py`：agent 端到端评测脚本（dry-run 默认，`--live` 才调 LLM）
 - [ ] OpenAI 及其他 provider 的真实调用验证

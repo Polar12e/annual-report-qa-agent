@@ -1,6 +1,14 @@
 import unittest
 
-from src.retrieval import PageIndex, chunk_page, load_index, tokenize
+from src.retrieval import (
+    PageIndex,
+    SearchHit,
+    chunk_page,
+    chunk_page_spans,
+    load_index,
+    tokenize,
+    window_for_hit,
+)
 
 
 class TokenizeTests(unittest.TestCase):
@@ -21,6 +29,38 @@ class ChunkTests(unittest.TestCase):
         chunks = chunk_page(text, size=200, overlap=40)
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(len(chunk) <= 400 for chunk in chunks))
+
+
+class ChunkSpanTests(unittest.TestCase):
+    def test_chunk_spans_are_line_aware(self):
+        text = "第一行\n\n第二行\n第三行\n第四行"
+        spans = chunk_page_spans(text, size=4, overlap=0)
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        self.assertGreater(len(spans), 1)
+        for piece, start, end in spans:
+            self.assertGreaterEqual(start, 1)
+            self.assertLessEqual(start, end)
+            self.assertEqual(piece, "\n".join(lines[start - 1:end]))
+        self.assertEqual(spans[0][1], 1)
+
+    def test_window_crosses_the_best_chunk_boundary(self):
+        page = "标题\n表头\n销售费用 1\n营业成本 2\n三 税项"
+        hit = SearchHit(
+            page=1, chunk=0, text="标题\n表头\n销售费用 1",
+            score=1.0, line_start=1, line_end=3,
+        )
+        window = window_for_hit(page, hit, radius=2, max_chars=900)
+        self.assertIn("销售费用 1", window.text)
+        self.assertIn("营业成本 2", window.text)
+        self.assertEqual(window.line_start, 1)
+        self.assertGreaterEqual(window.line_end, 4)
+
+    def test_window_falls_back_to_chunk_text_without_line_metadata(self):
+        page = "a\nb\nc"
+        hit = SearchHit(page=1, chunk=0, text="b\nc", score=1.0)
+        window = window_for_hit(page, hit, radius=1, max_chars=900)
+        self.assertIn("b", window.text)
+        self.assertIn("c", window.text)
 
 
 class SearchTests(unittest.TestCase):

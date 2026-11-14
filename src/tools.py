@@ -13,7 +13,8 @@ from src.contracts.financial import METRIC_CODES
 from src.data import CsvFinancialStore
 from src.data.csv_store import DataValidationError
 from src.policy import DataPolicy
-from src.retrieval import ChunkedIndex, load_index as load_retrieval_index
+from src.retrieval import ChunkedIndex, window_for_hit
+from src.retrieval import load_index as load_retrieval_index
 
 DEFAULT_DATA = Path(__file__).resolve().parents[1] / "data" / "financial_facts.csv"
 
@@ -170,19 +171,27 @@ class FinancialToolBox:
             raise ValueError("max_results must be a positive integer")
         hits = self.index.search(keyword, top_k=min(max_results, self.policy.max_snippets))
         self.policy.audit({"tool": "search_report", "pages": [hit.page for hit in hits]})
-        return {
-            "keyword": keyword,
-            "count": len(hits),
-            "matches": [
+        matches = []
+        for hit in hits:
+            window = window_for_hit(
+                self.index.page_text(hit.page),
+                hit,
+                max_chars=self.policy.max_snippet_chars,
+            )
+            matches.append(
                 {
                     "pdf_page": hit.page,
                     "chunk": hit.chunk,
                     "score": round(hit.score, 4),
-                    "text": self.policy.snippet(hit.text),
+                    "page_heading": window.heading,
+                    "line_start": window.line_start,
+                    "line_end": window.line_end,
+                    "truncated": window.truncated,
+                    "matched_terms": list(hit.matched_terms),
+                    "text": self.policy.snippet(window.text),
                 }
-                for hit in hits
-            ],
-        }
+            )
+        return {"keyword": keyword, "count": len(matches), "matches": matches}
 
     def _tool_read_page(self, page: int) -> dict:
         page = self._integer(page, "page")

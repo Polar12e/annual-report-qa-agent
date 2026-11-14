@@ -20,7 +20,7 @@ RAG 不是"向量库 + 大模型"，而是一条流水线。每一环的失败�
 | ② 切块 | 让一个 chunk 既能被召回、又能塞进上下文 | `src/retrieval.py::chunk_page` | 360 字符 / 80 字符重叠，按行切，避免表格行被切断 |
 | ③ 表示 | 把问题与 chunk 映射到同一空间 | `src/retrieval.py::tokenize`、`src/embedding.py` | 中文 bigram；LSA 192 维；`Embedder` 协议 |
 | ④ 排序 | 从 1,450 个 chunk 里挑 5 个 | `PageIndex` / `DenseIndex` / `HybridIndex` | BM25 k1=1.5 b=0.75；RRF k=60 |
-| ⑤ 组装 | 把命中的页拼成上下文 | `src/tools.py::_tool_search_report` | 每段截断 400 字符、最多 3 段（`src/policy.py`） |
+| ⑤ 组装 | 把命中的页拼成上下文 | `src/tools.py::_tool_search_report` | 每段截断 900 字符、最多 3 段（`src/policy.py`） |
 | ⑥ 引用与工具 | 让模型只说有据可查的话 | `src/tools.py` 的 5 个工具 + `read_page` | 数值永不由模型生成，只由工具计算 |
 
 一个容易被忽略的事实：**④ 排序错了，⑤⑥ 再讲究也没用**。所以这次升级只动 ③④，其余保持不动，评测也只看检索指标。
@@ -215,7 +215,7 @@ index = build_index("hybrid", embedder=embedder, dense_weight=0.35)
 2. **补分词**（词典 + 最大匹配，或引入 `jieba`），让 bigram 退化成词，词法通道也会涨；这是把 4 条"字符碎片"问题一起解决的唯一办法。
 3. **给 `para` 补"解释型"题**（为什么重述、影响多少），现在 8 题里有 6 题是查数。
 4. **重排（rerank）**：检索回 20 条，用 cross-encoder 或 LLM 打 3 条。小语料上比重建索引便宜。
-5. **上下文组装**：目前按页拼 400 字符，表格列容易错位；可以按"行块"组装并保留行号，让模型引用到行。
+5. **上下文组装**：第一阶段已完成——`search_report` 现在返回页标题 + 命中行窗口 + 行号，整页仍由 `read_page` 负责；下一步可做表格感知窗口和多窗口合并。
 
 ---
 
@@ -226,6 +226,8 @@ index = build_index("hybrid", embedder=embedder, dense_weight=0.35)
 | chunk 大小 / 重叠 | 360 / 80 字符 | `src/retrieval.py` |
 | BM25 参数 | k1=1.5, b=0.75 | `src/retrieval.py` |
 | 报表页加分 | 18.0，`NOTES_MARKERS` 命中时关闭 | `src/retrieval.py` |
+| 命中窗口 | chunk 行范围 ±2 行 | `src/retrieval.py` |
+| 片段上限 | 900 字符 | `src/policy.py` |
 | 概念重写权重 | 0.45 | `src/lexicon.py` |
 | OOV 触发阈值 | coverage < 0.5 | `src/retrieval.py` |
 | RRF k / 融合深度 | 60 / 60 | `src/retrieval.py` |

@@ -52,7 +52,7 @@ class DataPolicy:
     classification: DataClassification = DataClassification.PUBLIC
     allow_external: bool = False
     max_snippets: int = 3
-    max_snippet_chars: int = 400
+    max_snippet_chars: int = 900
     log_raw_text: bool = False
     audit_hook: Callable[[dict], None] | None = None
 
