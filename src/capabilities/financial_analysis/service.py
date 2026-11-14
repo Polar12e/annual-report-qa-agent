@@ -69,6 +69,11 @@ def calculate_metrics(current: list[FinancialFact], previous: list[FinancialFact
     return results
 
 
+def _pages(*facts: FinancialFact | None) -> tuple[int, ...]:
+    """Unique source pages for present input facts."""
+    return tuple(sorted({fact.pdf_page for fact in facts if fact is not None}))
+
+
 def _ratio(
     code: str,
     numerator: FinancialFact | None,
@@ -83,12 +88,15 @@ def _ratio(
         return MetricResult(code, None, formula, record_ids, "ratio", "invalid", message)
     if numerator is None or denominator is None:
         present = tuple(fact.record_id for fact in (numerator, denominator) if fact)
-        return MetricResult(code, None, formula, present, "ratio", "missing", "required input is missing")
+        return MetricResult(code, None, formula, present, "ratio", "missing",
+                            "required input is missing", _pages(numerator, denominator))
     error = _compatibility_error(numerator, denominator, across_years)
     if error:
-        return MetricResult(code, None, formula, (numerator.record_id, denominator.record_id), "ratio", "invalid", error)
+        return MetricResult(code, None, formula, (numerator.record_id, denominator.record_id),
+                            "ratio", "invalid", error, _pages(numerator, denominator))
     if denominator.value == 0:
-        return MetricResult(code, None, formula, (numerator.record_id, denominator.record_id), "ratio", "invalid", "denominator is zero")
+        return MetricResult(code, None, formula, (numerator.record_id, denominator.record_id),
+                            "ratio", "invalid", "denominator is zero", _pages(numerator, denominator))
     return MetricResult(
         code,
         numerator.value / denominator.value - offset,
@@ -96,6 +104,7 @@ def _ratio(
         (numerator.record_id, denominator.record_id),
         "ratio",
         "ok",
+        input_pages=_pages(numerator, denominator),
     )
 
 
@@ -111,12 +120,15 @@ def _difference_ratio(
         return MetricResult(code, None, formula, record_ids, "ratio", "invalid", message)
     if revenue is None or cost is None:
         present = tuple(fact.record_id for fact in (revenue, cost) if fact)
-        return MetricResult(code, None, formula, present, "ratio", "missing", "required input is missing")
+        return MetricResult(code, None, formula, present, "ratio", "missing",
+                            "required input is missing", _pages(revenue, cost))
     error = _compatibility_error(revenue, cost, False)
     if error:
-        return MetricResult(code, None, formula, (revenue.record_id, cost.record_id), "ratio", "invalid", error)
+        return MetricResult(code, None, formula, (revenue.record_id, cost.record_id),
+                            "ratio", "invalid", error, _pages(revenue, cost))
     if revenue.value == 0:
-        return MetricResult(code, None, formula, (revenue.record_id, cost.record_id), "ratio", "invalid", "denominator is zero")
+        return MetricResult(code, None, formula, (revenue.record_id, cost.record_id),
+                            "ratio", "invalid", "denominator is zero", _pages(revenue, cost))
     return MetricResult(
         code,
         (revenue.value - cost.value) / revenue.value,
@@ -124,6 +136,7 @@ def _difference_ratio(
         (revenue.record_id, cost.record_id),
         "ratio",
         "ok",
+        input_pages=_pages(revenue, cost),
     )
 
 

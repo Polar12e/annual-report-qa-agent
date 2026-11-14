@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .env
+agent_eval*.json
 _test_tmp/
 .piptmp/
 .tmp/

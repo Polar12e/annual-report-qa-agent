@@ -20,7 +20,11 @@ DEFAULT_DATA = Path(__file__).resolve().parents[1] / "data" / "financial_facts.c
 TOOL_SPECS: tuple[dict, ...] = (
     {
         "name": "list_available_data",
-        "description": "列出已核验的数据范围：公司、年份、可用指标和事实条数。",
+        "description": (
+            "列出已核验的财务事实范围：公司、年份、六个结构化指标和事实条数。"
+            "注意：它只代表 CSV 中已核验的指标，不代表年报全文；"
+            "存货、研发费用、销售费用、员工人数、分红等未入库科目请继续用 search_report/read_page 查原文。"
+        ),
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     {
@@ -54,7 +58,10 @@ TOOL_SPECS: tuple[dict, ...] = (
     },
     {
         "name": "search_report",
-        "description": "在年报全文中按关键词检索，返回最相关的页码、相关度和上下文。",
+        "description": (
+            "在 452 页年报全文中按关键词检索，返回页码、相关度和上下文。"
+            "可查任意科目/附注/口径，包括未录入 CSV 的存货、研发费用、销售费用、员工人数、分红等。"
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -132,6 +139,10 @@ class FinancialToolBox:
             "years": sorted({fact.year for fact in facts}),
             "metrics": sorted({fact.metric_code for fact in facts}),
             "fact_count": len(facts),
+            "note": (
+                "以上仅为已核验的 CSV 事实；存货、研发费用、销售费用、员工人数、分红等"
+                "未入库科目请用 search_report 检索年报全文，不要仅凭本工具回答“没有数据”。"
+            ),
         }
 
     def _tool_query_financials(self, company_code: str, year: int, metric_codes: list[str] | None = None) -> dict:

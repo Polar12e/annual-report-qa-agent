@@ -36,3 +36,7 @@ class MetricResult:
     unit: str
     status: Literal["ok", "missing", "invalid"]
     error: str | None = None
+    # Pages of the input facts, so a metric answer can cite its sources without
+    # a second query_financials call.  Kept at the end and defaulted so existing
+    # positional construction stays compatible.
+    input_pages: tuple[int, ...] = ()

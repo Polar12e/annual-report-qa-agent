@@ -76,7 +76,7 @@ class Embedder(Protocol):
     def encode(self, texts: Sequence[str]) -> np.ndarray   # (n, dim)，L2 归一化
 ```
 
-离线默认实现是 `LsaEmbedder`：TF-IDF 矩阵（21,629 个 bigram 词表）→ 随机化 SVD 取前 192 维（numpy 实现，固定随机种子，可复现）→ 余弦相似度。向量写入 `.cache/embeddings/*.npz`，键是"语料指纹 + provider 名 + 维度"，重建索引不再重算 1,450 条。
+离线默认实现是 `LsaEmbedder`：TF-IDF 矩阵（当前语料约 21,612 个 bigram 词表）→ 随机化 SVD 取前 192 维（numpy 实现，固定随机种子，可复现）→ 余弦相似度。向量写入 `.cache/embeddings/*.npz`，键是"语料指纹 + provider 名 + 维度"，重建索引不再重算 1,450 条向量（LSA fit 仍会重新执行）。
 
 它为什么弱？因为 **LSA 学到的是"共现平滑"，不是语义**。在 1,450 个 chunk、418k 字符的语料上，主成分几乎全部被"本公司 / 年度 / 合并 / 单位：千元"这类模板句占据，最近的邻居是共享字符的碎片：
 
@@ -124,7 +124,7 @@ score(page) = Σ_channels  weight_c / (k + rank_c(page)),  k = 60
 
 ### 3.3 我踩的两个坑，写下来防止重犯
 
-1. **标签写窄了。** `pa04`（研发投了多少钱）最初只标了第 54 页（董事会报告的"研发投入情况"表），但第 159 页利润表的"研发费用 16,232,771"同样回答了问题；`pa07`（存货计提损失）最初只标第 251 页，而第 376/220 页的"存货跌价准备"明细更直接。核对原文后把这两题的 `expected_pages` 补全。
+1. **标签写窄了。** `pa04`（研发投了多少钱）最初只标了第 54 页（董事会报告的"研发投入情况"表），但第 159 页利润表的"研发费用 16,232,771"同样回答了问题；`pa07`（存货计提损失）最初只标第 251 页，而第 376/220 页的"存货跌价准备"明细更直接。`pa01`（仓库里压了多少货）最初只标第 157 页资产负债表合计，但第 220/376 页的存货附注给出了分类明细，同样/更直接地回答了问题；核对原文后把 `expected_pages` 补全为 `[157, 220, 376]`。`pa06` 的 280/436 页是同一份外汇风险附注的两份副本，`pa08` 的 301 页是摘要股东表、143 页是"80% 质押阈值不适用"的说明，也分别补全了 `expected_pages`。
    **规则**：只有在原文里逐字核对过"这页确实回答了这个问题"才改标签，并且记录改动原因（就是这一段）。反过来做就是拿测试集喂模型。
 2. **分数当概率用。** 一开始想"BM25 分数 + 余弦相似度"加权求和，试了一次就发现两者量纲完全无关（25 分 vs 0.62），只能靠 RRF 这种名次融合。
 
@@ -138,7 +138,7 @@ score(page) = Σ_channels  weight_c / (k + rank_c(page)),  k = 60
 |---|---|---|---|---|
 | dev (14) | h1 1.00 / h3 1.00 / mrr 1.00 | **1.00 / 1.00 / 1.00** | 0.36 / 0.57 / 0.45 | 1.00 / 1.00 / 1.00 |
 | holdout (4) | 1.00 / 1.00 / 1.00 | **1.00 / 1.00 / 1.00** | 0.25 / 0.50 / 0.33 | 1.00 / 1.00 / 1.00 |
-| para (8) | 0.38 / 0.50 / 0.47 | **0.50 / 0.62 / 0.59** | 0.25 / 0.50 / 0.38 | 0.50 / 0.62 / 0.59 |
+| para (8) | 0.38 / 0.50 / 0.47 | **0.50 / 0.62 / 0.59** | 0.38 / 0.50 / 0.44 | 0.50 / 0.62 / 0.59 |
 | para_holdout (6) | 0.17 / 0.17 / 0.28 | **0.33 / 0.33 / 0.41** | 0.00 / 0.00 / 0.00 | 0.33 / 0.33 / 0.41 |
 
 （`hybrid` 默认稠密权重为 0，所以数值等于 `expanded`；把权重开到 0.35 就会掉到 dev 0.86 / holdout 0.75。）
@@ -150,11 +150,11 @@ score(page) = Σ_channels  weight_c / (k + rank_c(page)),  k = 60
 | pa01 | 仓库里压了多少货还没卖出去 | 4 | **2** | 概念重写救回 |
 | pa02 | 客户欠公司的钱还有多少没收回来 | 5 | 5 | 首轮命中但排第 5，仍算失败 |
 | pa03 | 去年给股东分了多少现金 | 1 | 1 | 字面"股东 / 现金"已够 |
-| pa04 | 一年在技术上要投多少钱 | None | None | 扩到"研发投入"仍被报表页压住 |
+| pa04 | 一年在技术上要投多少钱 | None | None | coverage 0.583，auto 未触发重写；仍被报表页压住 |
 | pa05 | 一年给员工发多少现金 | 1 | 1 | —— |
 | pa06 | 人民币升值或贬值利润变动多少 | 1 | 1 | "升值 / 贬值"字面命中 |
 | pa07 | 卖不掉的存货要计提多少损失 | 3 | **1** | 概念重写救回 |
-| pa08 | 大股东的股票有没有被抵押出去 | None | None | "抵押→质押"已重写，仍不敌注册资本页 |
+| pa08 | 大股东的股票有没有被抵押出去 | None | None | coverage 0.846，auto 未触发重写；仍不敌注册资本页 |
 | ph01 | 欠供应商的货款有多少 | 5 | 5 | —— |
 | ph02 | 去年一共交了多少税 | None | None | "交税"与"支付的各项税费"无 bigram 重叠 |
 | ph03 | 账上躺着多少钱 | 4 | 4 | —— |
@@ -185,7 +185,7 @@ embedder = OpenAICompatibleEmbedder(model="bge-m3", base_url="http://127.0.0.1:1
 index = build_index("hybrid", embedder=embedder, dense_weight=0.35)
 ```
 
-`OpenAICompatibleEmbedder` 已经处理：批大小、`index` 字段乱序、非 2xx 不重试（4xx 直接报错）、超时重试 2 次、维度不符立刻报错（避免悄悄写坏缓存）、只允许内网/本地端点（`src/policy.py` 的 `ensure_endpoint`）。
+`OpenAICompatibleEmbedder` 已经处理：批大小、`index` 字段乱序、非 2xx 不重试（4xx 直接报错）、超时重试 2 次、维度不符立刻报错（避免悄悄写坏缓存）。端点校验目前只在 `OpenAIPolicy` 实现；embedding 路径尚未接入 `src/policy.py`，接外部 embedding 前需要补齐。
 
 接完必须重做的校准：
 
@@ -230,7 +230,43 @@ index = build_index("hybrid", embedder=embedder, dense_weight=0.35)
 | OOV 触发阈值 | coverage < 0.5 | `src/retrieval.py` |
 | RRF k / 融合深度 | 60 / 60 | `src/retrieval.py` |
 | 稠密权重默认 | 0（实测更差） | `src/retrieval.py` |
-| LSA 维度 / 词表 | 192 / 21,629 | `src/embedding.py` |
-| 冷启动建向量 | ≈5 秒（1,450 chunk），命中缓存后 0 秒 | `src/embedding.py` |
+| LSA 维度 / 词表 | 192 / 约 21,612 | `src/embedding.py` |
+| dense 构建 | 约 2–3 秒（含 LSA fit；缓存只省向量计算） | `src/embedding.py` |
 | 向量缓存 | `.cache/embeddings/*.npz` | `src/embedding.py` |
 | 默认通道 | `expanded` | `src/retrieval.py` |
+
+---
+
+## 10. LLM 接入后的端到端实测（2026-11）
+
+`evals/agent_eval.py` 让 `agent.run` 走完整策略循环，而不是只测 `index.search`。当前配置：
+
+```text
+provider=deepseek  model=deepseek-flash  thinking=disabled  max_steps=6
+```
+
+结果：
+
+| split | 通过 |
+|---|---|
+| dev (14) | 14/14 |
+| holdout (4) | 4/4 |
+| para (8) | 5/8 |
+| para_holdout (6) | 5/6 |
+| 合计 | 28/32 |
+
+4 个失败都在口语诊断集：
+
+- `pa06`：模型引用了 280 页，而 436/280 是同一份外汇风险附注的两份副本；补全 `expected_pages` 后单独重跑通过；
+- `pa08`：301 页是摘要股东表、143 页是"80% 质押阈值不适用"，同样补全标签后通过；
+- `pa07`：一次回答正确但没有页码，属于引用缺失/采样波动；重跑引用 220 页后通过；
+- `ph04`："收购别人多花了多少钱"口径不明确（商誉 / 对价 / 溢价），模型在 `max_steps` 内得不出结论；需要先改题目或标签。
+
+关于查询改写：**没有采用 LLM 改写作为默认层**。当前 `OpenAIPolicy` 已经让模型自己生成 `search_report` 的关键词，再加一层改写会增加一次调用和不确定性；而 4 个失败中只有 `pa08` 明显能从更好的查询词受益，`pa06/pa07` 是标签/引用问题，`ph04` 是题目歧义。保留 `expanded` + 模型自选关键词，先补稳定性和负向用例。
+
+复跑命令：
+
+```bash
+python -m evals.agent_eval --all --live --allow-external --max-steps 10
+python -m evals.agent_eval --all --split holdout --live --allow-external
+```

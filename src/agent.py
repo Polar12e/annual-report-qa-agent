@@ -13,6 +13,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from src.llm_config import PROVIDERS, LLMSettings
 from src.retrieval import CHANNELS
 from src.tools import FinancialToolBox
 
@@ -150,7 +151,16 @@ def build_policy(args):
     if args.policy == "llm":
         from src.llm_policy import OpenAIPolicy
 
-        return OpenAIPolicy(model=args.model, base_url=args.base_url, allow_external=args.allow_external)
+        settings = LLMSettings.from_env(
+            provider=getattr(args, "provider", None),
+            model=args.model,
+            base_url=args.base_url,
+            timeout=getattr(args, "timeout", None),
+            max_retries=getattr(args, "max_retries", None),
+            thinking=getattr(args, "thinking", None),
+            allow_external=getattr(args, "allow_external", None),
+        )
+        return OpenAIPolicy.from_settings(settings)
     return ScriptedPolicy()
 
 
@@ -158,15 +168,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="最小 Agent 循环（默认脚本策略，无需 API key）")
     parser.add_argument("question", nargs="?", default="美的集团 2024 年毛利率是多少？")
     parser.add_argument("--policy", choices=("scripted", "llm"), default="scripted")
-    parser.add_argument("--model", help="模型名，默认读 FIN_AGENT_MODEL")
-    parser.add_argument("--base-url", help="OpenAI 兼容端点，默认读 OPENAI_BASE_URL")
-    parser.add_argument("--allow-external", action="store_true", help="允许调用公网模型端点（默认只允许内网/本地）")
+    parser.add_argument("--provider", choices=PROVIDERS,
+                        help="模型提供方，默认 auto（按环境变量推断）")
+    parser.add_argument("--model", help="模型名，默认读 FIN_AGENT_MODEL；DeepSeek 默认 deepseek-flash")
+    parser.add_argument("--base-url", help="OpenAI 兼容端点，默认读 FIN_AGENT_BASE_URL/OPENAI_BASE_URL")
+    parser.add_argument("--thinking", action="store_true", default=None,
+                        help="启用 DeepSeek 思考模式（默认关闭）")
+    parser.add_argument("--timeout", type=float, default=None,
+                        help="请求超时秒数，默认读 FIN_AGENT_TIMEOUT（30）")
+    parser.add_argument("--max-retries", type=int, default=None,
+                        help="SDK 重试次数，默认读 FIN_AGENT_MAX_RETRIES（2）")
+    parser.add_argument("--allow-external", action="store_true", default=None,
+                        help="允许调用公网模型端点（默认只允许内网/本地）")
     parser.add_argument("--retriever", choices=CHANNELS, default="expanded", help="检索通道，默认 expanded")
     parser.add_argument("--max-steps", type=int, default=6)
     args = parser.parse_args()
     try:
         policy = build_policy(args)
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         parser.error(str(exc))
     toolbox = FinancialToolBox(retriever=args.retriever)
     result = run(args.question, policy=policy, max_steps=args.max_steps, toolbox=toolbox)

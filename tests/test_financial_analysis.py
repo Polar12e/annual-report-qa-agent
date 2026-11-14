@@ -88,6 +88,19 @@ class CalculationTests(unittest.TestCase):
         self.assertEqual(by_code["debt_to_assets"].status, "invalid")
         self.assertIn("total_assets", by_code["debt_to_assets"].error)
 
+    def test_metric_results_include_source_pages(self):
+        current = [
+            replace(fact("r24", "revenue", 120), pdf_page=159),
+            replace(fact("c24", "cost_of_revenue", 90), pdf_page=159),
+            replace(fact("a24", "total_assets", 200), pdf_page=157),
+            replace(fact("l24", "total_liabilities", 100), pdf_page=158),
+        ]
+        previous = [replace(fact("r23", "revenue", 100, 2023), pdf_page=159)]
+        by_code = {result.metric_code: result for result in calculate_metrics(current, previous)}
+        self.assertEqual(by_code["revenue_yoy"].input_pages, (159,))
+        self.assertEqual(by_code["gross_margin"].input_pages, (159,))
+        self.assertEqual(by_code["debt_to_assets"].input_pages, (157, 158))
+
     def test_query_financials(self):
         facts = [fact("r", "revenue", 1), fact("c", "cost_of_revenue", 2)]
         self.assertEqual(len(query_financials(facts, "000333.SZ", 2024, [])), 2)

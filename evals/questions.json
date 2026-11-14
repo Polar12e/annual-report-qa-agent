@@ -108,7 +108,8 @@
     "id": "pa01",
     "split": "para",
     "question": "公司仓库里压了多少货还没卖出去？",
-    "expected_pages": [157]
+    "expected_pages": [157, 220, 376],
+    "note": "157 is the balance-sheet total; 220/376 are the inventory note with the breakdown."
   },
   {
     "id": "pa02",
@@ -138,7 +139,8 @@
     "id": "pa06",
     "split": "para",
     "question": "人民币升值或贬值，公司的利润会变动多少？",
-    "expected_pages": [436]
+    "expected_pages": [436, 280],
+    "note": "280 (annual report notes) and 436 (standalone statements notes) contain the same FX sensitivity disclosure."
   },
   {
     "id": "pa07",
@@ -150,7 +152,8 @@
     "id": "pa08",
     "split": "para",
     "question": "大股东的股票有没有被抵押出去？",
-    "expected_pages": [143]
+    "expected_pages": [143, 301],
+    "note": "143 discloses that the 80% pledge threshold is not applicable; 301 is the summary shareholder table with a pledge/freeze column."
   },
   {
     "id": "ph01",

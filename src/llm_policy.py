@@ -2,14 +2,13 @@
 
 The policy is deliberately thin: it turns the conversation into chat messages,
 asks the model for one action, and returns the same action shape the scripted
-policy uses.  A client can be injected (tests do this), so no network or API
-key is required to exercise the loop.
+policy uses.  Connection details are resolved by :class:`src.llm_config.LLMSettings`;
+the client can be injected (tests do this), so no network or API key is needed
+to exercise the loop.
 
-Environment variables:
-
-- ``OPENAI_API_KEY`` / ``DEEPSEEK_API_KEY``: credentials
-- ``OPENAI_BASE_URL``: custom endpoint (DeepSeek defaults to https://api.deepseek.com)
-- ``FIN_AGENT_MODEL``: model name (default ``gpt-4o-mini`` or ``deepseek-chat``)
+Environment variables are documented in ``src/llm_config.py``.  The most common
+ones are ``DEEPSEEK_API_KEY``, ``OPENAI_API_KEY``, ``FIN_AGENT_PROVIDER`` and
+``FIN_AGENT_MODEL``.
 
 Data boundary: public endpoints are refused unless ``allow_external=True``
 (see ``src/policy.py``).  Internal deployments work out of the box.
@@ -17,10 +16,10 @@ Data boundary: public endpoints are refused unless ``allow_external=True``
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from src.llm_config import LLMSettings
 from src.policy import DataPolicy
 from src.tools import TOOL_SPECS
 
@@ -33,6 +32,7 @@ SYSTEM_PROMPT = """你是一名严谨的财务分析助手。
 2. 每次只调用一个工具，拿到结果后再决定下一步。
 3. 回答时引用工具返回的 PDF 页码或 record_id。
 4. 如果工具返回 ok=false 或 status=invalid/missing，要说明原因，不要猜测。
+5. list_available_data 只覆盖已核验的六个结构化指标；如果问题涉及存货、研发费用、销售费用、员工人数、分红等未入库科目，必须继续调用 search_report/read_page 查年报原文，不能仅凭 list_available_data 回答“没有数据”。
 """
 
 
@@ -60,47 +60,109 @@ class OpenAIPolicy:
         api_key: str | None = None,
         base_url: str | None = None,
         client=None,
-        timeout: float = 30.0,
+        timeout: float | None = None,
         policy: DataPolicy | None = None,
         allow_external: bool | None = None,
+        thinking: bool | None = None,
+        max_retries: int | None = None,
+        settings: LLMSettings | None = None,
     ):
-        self.policy = policy or DataPolicy()
-        if allow_external is not None:
-            self.policy = replace(self.policy, allow_external=allow_external)
-        self.model = model or os.environ.get("FIN_AGENT_MODEL")
-        self.base_url = base_url
         self.tools = to_openai_tools()
         self._client = client
+
+        # ``client`` is the test seam: no credentials, endpoint checks or SDK
+        # import are needed when a client is injected.
         if client is not None:
-            self.model = self.model or "gpt-4o-mini"
+            self.provider = settings.provider if settings is not None else "injected"
+            self.model = model or (settings.model if settings is not None else "gpt-4o-mini")
+            self.base_url = base_url or (settings.base_url if settings is not None else None)
+            self.thinking = (
+                thinking
+                if thinking is not None
+                else (settings.thinking if settings is not None else False)
+            )
+            self.max_retries = (
+                max_retries
+                if max_retries is not None
+                else (settings.max_retries if settings is not None else 2)
+            )
+            self.policy = self._resolve_policy(policy, allow_external, settings)
             return
 
-        api_key = api_key or os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            api_key = os.environ.get("DEEPSEEK_API_KEY")
-            if api_key:
-                base_url = base_url or "https://api.deepseek.com"
-                self.model = self.model or "deepseek-chat"
-        if not api_key:
-            raise RuntimeError(
-                "未配置模型凭据：请设置 OPENAI_API_KEY 或 DEEPSEEK_API_KEY；"
-                "也可以注入 client 以便离线测试。"
+        if settings is None:
+            settings = LLMSettings.from_env(
+                model=model,
+                base_url=base_url,
+                api_key=api_key,
+                timeout=timeout,
+                max_retries=max_retries,
+                thinking=thinking,
+                allow_external=allow_external,
             )
-        base_url = base_url or os.environ.get("OPENAI_BASE_URL")
-        self.base_url = base_url
-        self.policy.ensure_endpoint(base_url)
+
+        self.provider = settings.provider
+        self.model = settings.model
+        self.base_url = settings.base_url
+        self.thinking = settings.thinking
+        self.max_retries = settings.max_retries
+        self.policy = self._resolve_policy(policy, allow_external, settings)
+        self.policy.ensure_endpoint(self.base_url)
+
+        if not settings.api_key:
+            raise RuntimeError("模型凭据缺失：LLMSettings.api_key 为空。")
         try:
             from openai import OpenAI
         except ImportError as exc:
             raise RuntimeError("openai SDK 不可用，请先执行 pip install -U openai") from exc
-        self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
-        self.model = self.model or "gpt-4o-mini"
+
+        self._client = OpenAI(
+            api_key=settings.api_key,
+            base_url=self.base_url,
+            timeout=settings.timeout,
+            max_retries=self.max_retries,
+        )
+
+    @classmethod
+    def from_settings(
+        cls,
+        settings: LLMSettings,
+        *,
+        client=None,
+        policy: DataPolicy | None = None,
+    ) -> OpenAIPolicy:
+        """Build a policy from an already-resolved configuration."""
+        return cls(settings=settings, client=client, policy=policy)
+
+    @staticmethod
+    def _resolve_policy(
+        policy: DataPolicy | None,
+        allow_external: bool | None,
+        settings: LLMSettings | None,
+    ) -> DataPolicy:
+        # A caller-supplied policy is authoritative; settings only provide the
+        # default when we construct one.  An explicit ``allow_external`` always
+        # wins because it is the most local decision.
+        if policy is None:
+            resolved = DataPolicy(
+                allow_external=settings.allow_external if settings is not None else False
+            )
+        else:
+            resolved = policy
+        if allow_external is not None:
+            resolved = replace(resolved, allow_external=allow_external)
+        return resolved
+
+    @property
+    def _uses_deepseek(self) -> bool:
+        if self.provider == "deepseek":
+            return True
+        return bool(self.base_url and "deepseek" in self.base_url.lower())
 
     def decide(self, question: str, history: list[Step]) -> dict:
         messages = self._messages(question, history)
         self.policy.audit(
             {
-                "provider": "openai-compatible",
+                "provider": self.provider,
                 "model": self.model,
                 "endpoint": self.base_url,
                 "messages": len(messages),
@@ -108,12 +170,20 @@ class OpenAIPolicy:
                 "pages": _pages_from_history(history),
             }
         )
-        response = self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            tools=self.tools,
-            tool_choice="auto",
-        )
+        request = {
+            "model": self.model,
+            "messages": messages,
+            "tools": self.tools,
+            "tool_choice": "auto",
+        }
+        if self._uses_deepseek:
+            # DeepSeek enables thinking by default.  This loop needs a single
+            # deterministic action per turn, so make the mode explicit instead
+            # of depending on the provider default.
+            request["extra_body"] = {
+                "thinking": {"type": "enabled" if self.thinking else "disabled"}
+            }
+        response = self._client.chat.completions.create(**request)
         message = response.choices[0].message
         calls = getattr(message, "tool_calls", None)
         if calls:
@@ -173,3 +243,6 @@ def _pages_from_history(history: list[Step]) -> list[int]:
                 if isinstance(page, int):
                     pages.add(page)
     return sorted(pages)
+
+
+__all__ = ["SYSTEM_PROMPT", "OpenAIPolicy", "to_openai_tools"]

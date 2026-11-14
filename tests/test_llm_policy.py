@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.agent import run
+from src.llm_config import LLMSettings
 from src.llm_policy import OpenAIPolicy, to_openai_tools
 from src.policy import PolicyViolation
 from src.tools import FinancialToolBox
@@ -85,6 +86,71 @@ class PolicyDecisionTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(PolicyViolation):
                 OpenAIPolicy(api_key="k", base_url="https://api.openai.com/v1")
+
+
+class SettingsPolicyTests(unittest.TestCase):
+    def settings(self, **overrides):
+        values = {
+            "provider": "deepseek",
+            "model": "deepseek-flash",
+            "base_url": "https://api.deepseek.com",
+            "api_key": "sk-test",
+        }
+        values.update(overrides)
+        return LLMSettings(**values)
+
+    def test_deepseek_disables_thinking_by_default(self):
+        client = FakeClient([final_response("ok")])
+        policy = OpenAIPolicy(settings=self.settings(), client=client)
+        self.assertEqual(policy.decide("x", []), {"type": "final", "answer": "ok"})
+        request = client.chat.completions.requests[0]
+        self.assertEqual(request["extra_body"], {"thinking": {"type": "disabled"}})
+
+    def test_deepseek_thinking_can_be_enabled(self):
+        client = FakeClient([final_response("ok")])
+        policy = OpenAIPolicy(settings=self.settings(thinking=True), client=client)
+        policy.decide("x", [])
+        self.assertEqual(
+            client.chat.completions.requests[0]["extra_body"],
+            {"thinking": {"type": "enabled"}},
+        )
+
+    def test_non_deepseek_does_not_send_thinking(self):
+        client = FakeClient([final_response("ok")])
+        settings = self.settings(
+            provider="openai",
+            model="gpt-4o-mini",
+            base_url="https://api.openai.com/v1",
+        )
+        policy = OpenAIPolicy(settings=settings, client=client)
+        policy.decide("x", [])
+        self.assertNotIn("extra_body", client.chat.completions.requests[0])
+
+    def test_settings_still_honour_external_endpoint_policy(self):
+        with self.assertRaises(PolicyViolation):
+            OpenAIPolicy.from_settings(self.settings(allow_external=False))
+
+    def test_settings_can_describe_a_local_endpoint(self):
+        settings = self.settings(
+            provider="local",
+            model="qwen3:8b",
+            base_url="http://127.0.0.1:11434/v1",
+            api_key="local",
+        )
+        policy = OpenAIPolicy(settings=settings, client=FakeClient([final_response("ok")]))
+        self.assertEqual(policy.model, "qwen3:8b")
+        self.assertEqual(policy.base_url, "http://127.0.0.1:11434/v1")
+
+    def test_caller_policy_is_authoritative(self):
+        from src.policy import DataPolicy
+
+        settings = self.settings(allow_external=False)
+        policy = OpenAIPolicy(
+            settings=settings,
+            client=FakeClient([final_response("ok")]),
+            policy=DataPolicy(allow_external=True),
+        )
+        self.assertTrue(policy.policy.allow_external)
 
 
 class LLMLoopTests(unittest.TestCase):
