@@ -23,6 +23,7 @@ V1.2 把 LLM 从协议占位推进到真实调用：新增 `src/llm_config.py`�
 - 离线评测：dev 14 + holdout 4 + 诊断集 para 8 + para_holdout 6，检索与数值两类指标
 - 测试：158 个单元测试
 - 学习笔记：`docs/rag-notes.md`（原理 → 代码映射 → 实测 → 走过的弯路）
+- 交接文档：[HANDOVER.md](HANDOVER.md)
 
 ## 目录结构
 
